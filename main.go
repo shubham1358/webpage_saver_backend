@@ -17,7 +17,7 @@ func main() {
 	// Global middleware
 	// Logger middleware will write the logs to gin.DefaultWriter even if you set with GIN_MODE=release.
 	// By default gin.DefaultWriter = os.Stdout
-	router := gin.Default()
+	router := gin.New()
 	// Set up a custom logger to write to the log directory
 	logFile, err := os.OpenFile("log/gin.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
