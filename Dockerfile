@@ -21,9 +21,10 @@ ARG MHTML_VERSION=2.0.0
 
 RUN echo "Go gcflags: ${SKAFFOLD_GO_GCFLAGS}"
 RUN mkdir -p /out
-RUN go build -gcflags="${SKAFFOLD_GO_GCFLAGS}" -mod=readonly -v -o /out/app
-RUN curl -L -o /out/mhtml-to-html \
+RUN go build -gcflags="${SKAFFOLD_GO_GCFLAGS}" -mod=readonly -v -o /app
+RUN curl -L -o /mhtml-to-html \
  https://github.com/gildas-lormeau/mhtml-to-html/releases/download/${MHTML_VERSION}/mhtml-to-html-x86_64-linux
+
 # Now create separate deployment image
 FROM gcr.io/distroless/static-debian11
 
@@ -34,7 +35,7 @@ ENV GOTRACEBACK=single
 
 # Copy template & assets
 WORKDIR /websaver
-COPY --from=build /out/ ./out/
+COPY --from=build /app ./app
+COPY --from=build /mhtml-to-html ./mhtml-to-html
 
-
-ENTRYPOINT ["./out/app"]
+ENTRYPOINT ["./app"]
