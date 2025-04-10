@@ -1,0 +1,9 @@
+.dockerignore
+.vscode
+.idea
+.readmes
+log/*
+database/*
+.env.local
+page_store/*
+mhtml-to-html

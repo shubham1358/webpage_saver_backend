@@ -4,7 +4,12 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
+	"webpage_saver/constants"
+	"webpage_saver/constants/envKeys"
+	"webpage_saver/firestoredb"
+	"webpage_saver/storage"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-rod/rod"
@@ -15,7 +20,6 @@ import (
 func downloadPage(url string, browser *rod.Browser) bool {
 	// Launch a browser with default options
 	// Create a new page
-	db := GetDBInstance()
 	page := browser.MustPage(url)
 
 	// Wait for the page to load completely
@@ -30,8 +34,10 @@ func downloadPage(url string, browser *rod.Browser) bool {
 		return false
 	}
 	pageUUID := uuid.New()
-	filePath := "page_store/" + pageUUID.String() + ".mhtml"
-	htmlPath := "page_store/" + pageUUID.String() + ".html"
+	tempDir := os.TempDir()
+	filePath := filepath.Join(tempDir, pageUUID.String()+".mhtml")
+	htmlPath := filepath.Join(tempDir, pageUUID.String()+".html")
+	objectPath := os.Getenv(string(envKeys.StoragePath)) + "/" + pageUUID.String() + ".html"
 	// Save the MHTML content to a file
 	err = os.WriteFile(filePath, []byte(snapshot.Data), 0644)
 	if err != nil {
@@ -47,10 +53,23 @@ func downloadPage(url string, browser *rod.Browser) bool {
 		log.Printf("Failed to convert MHTML to HTML: %v", err)
 		return false
 	}
-	// Insert the page data into the database
-	_, err = db.Exec("INSERT INTO webmap (id, url, path) VALUES (?, ?, ?)", pageUUID, url, htmlPath)
+	// Upload the HTML file to Google Cloud Storage
+	err = storage.UploadFile(objectPath, htmlPath)
 	if err != nil {
-		log.Printf("Failed to insert data into database: %v", err)
+		log.Printf("Failed to upload file to Google Cloud Storage: %v", err)
+		return false
+	}
+	// Insert the page data into the database
+	WebSaver := constants.WebSaver{
+		Url:      url,
+		Path:     objectPath,
+		Date:     time.Now(),
+		DateOnly: time.Now().Truncate(24 * time.Hour),
+	}
+
+	err = firestoredb.AddPage(WebSaver)
+	if err != nil {
+		log.Printf("Failed to save page data to Firestore: %v", err)
 		return false
 	}
 
@@ -58,7 +77,7 @@ func downloadPage(url string, browser *rod.Browser) bool {
 	return true
 }
 
-func saveEndpoint(c *gin.Context, browser *rod.Browser) {
+func SaveHandler(c *gin.Context) {
 	var requestBody struct {
 		URL string `json:"url"`
 	}
@@ -73,6 +92,8 @@ func saveEndpoint(c *gin.Context, browser *rod.Browser) {
 	}
 
 	// Download the page as MHTML
+	browser := rod.New().MustConnect()
+	defer browser.MustClose()
 	response := downloadPage(url, browser)
 	if response {
 		c.JSON(200, gin.H{"message": "Page saved successfully"})
@@ -81,23 +102,54 @@ func saveEndpoint(c *gin.Context, browser *rod.Browser) {
 	}
 }
 
-func getPageEndpoint(c *gin.Context) {
+func GetPageHander(c *gin.Context) {
+	url := c.Query("url")
+	date := c.Query("date")
+	if url == "" {
+		c.JSON(400, gin.H{"error": "URL parameter is required"})
+		return
+	}
+	// db := GetDBInstance()
+	// Query the database for the page
+	// Use a pointer to scan the value
+	pageData, parsedDate, err := firestoredb.GetWebPageByDate(url, date)
+	if err != nil {
+		c.JSON(404, gin.H{"error": "Page not found"})
+		return
+	}
+	if pageData.Url == "" {
+		c.JSON(404, gin.H{"error": "Page not found"})
+		return
+	}
+	downloadedData, err := storage.DownloadFileIntoMemory(pageData.Path)
+
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to generate URL"})
+		return
+	}
+	c.JSON(200, gin.H{
+		"html": string(downloadedData),
+		"date": parsedDate,
+	})
+}
+
+func GetDatesHandler(c *gin.Context) {
+	date := c.Query("date")
 	url := c.Query("url")
 	if url == "" {
 		c.JSON(400, gin.H{"error": "URL parameter is required"})
 		return
 	}
-	db := GetDBInstance()
+	if date == "" {
+		c.JSON(400, gin.H{"error": "date parameter is required"})
+		return
+	}
 	// Query the database for the page
-	// Use a pointer to scan the value
-	var path string
-	err := db.QueryRow("SELECT path FROM webmap WHERE url = ? ORDER BY created_at DESC", url).Scan(&path)
+	dates, err := firestoredb.GetAvailableDatesByMonth(url, date)
 	if err != nil {
+		log.Printf("Failed to get available dates: %v", err)
 		c.JSON(404, gin.H{"error": "Page not found"})
 		return
 	}
-
-	// Serve the HTML file directly
-	c.Header("Content-Type", "text/html")
-	c.File(path)
+	c.JSON(200, gin.H{"dates": dates})
 }
