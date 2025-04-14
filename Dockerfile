@@ -20,13 +20,18 @@ ARG SKAFFOLD_GO_GCFLAGS
 ARG MHTML_VERSION=2.0.0
 
 RUN echo "Go gcflags: ${SKAFFOLD_GO_GCFLAGS}"
-RUN mkdir -p /out
+
+RUN apt-get update && apt-get install -y \
+    chromium \
+    ca-certificates \
+    fonts-liberation
+
 RUN go build -gcflags="${SKAFFOLD_GO_GCFLAGS}" -mod=readonly -v -o /app
 RUN curl -L -o /mhtml-to-html \
  https://github.com/gildas-lormeau/mhtml-to-html/releases/download/${MHTML_VERSION}/mhtml-to-html-x86_64-linux
-
+RUN echo "Contents of /usr/bin:" && ls /usr/bin/
 # Now create separate deployment image
-FROM gcr.io/distroless/static-debian11
+FROM gcr.io/distroless/static-debian12
 
 # Definition of this variable is used by 'skaffold debug' to identify a golang binary.
 # Default behavior - a failure prints a stack trace for the current goroutine.
@@ -37,5 +42,10 @@ ENV GOTRACEBACK=single
 WORKDIR /websaver
 COPY --from=build /app ./app
 COPY --from=build /mhtml-to-html ./mhtml-to-html
-
+COPY --from=build /usr/bin/chromium /usr/bin/chromium
+COPY --from=build /usr/lib /usr/lib
+COPY --from=build /usr/share/fonts /usr/share/fonts
+COPY --from=build /etc/fonts /etc/fonts
+# Set environment for Rod to use Chromium inside Docker
+ENV ROD_BROWSER_PATH=/usr/bin/chromium
 ENTRYPOINT ["./app"]

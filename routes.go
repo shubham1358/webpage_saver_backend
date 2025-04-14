@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/google/uuid"
 )
@@ -90,10 +91,11 @@ func SaveHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "URL parameter is required"})
 		return
 	}
-
+	path, _ := launcher.LookPath()
+	u := launcher.New().Bin(path).Headless(true).NoSandbox(true).Set("disable-gpu", "true").MustLaunch()
 	// Download the page as MHTML
-	browser := rod.New().MustConnect()
-	defer browser.MustClose()
+
+	browser := rod.New().ControlURL(u).MustConnect()
 	response := downloadPage(url, browser)
 	if response {
 		c.JSON(200, gin.H{"message": "Page saved successfully"})
